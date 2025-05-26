@@ -1,30 +1,46 @@
 <body style="margin:0">
     <input type="file" id="filein" name="filein" accept="image/png, image/jpeg" />
-    <canvas style="width:100vw;height:100vh"></canvas>
+    <br>
+    <canvas style="width:100px;height:100px"></canvas>
     <script>
-        var h, w, d, g, v, f, p, s, c = document.querySelector('canvas'), r = new Date().getTime();
+        var h, w, d, gl, v, f, p, s, c = document.querySelector('canvas'), r = new Date().getTime();
         v = `attribute vec3 p;void main(){gl_Position=vec4(p,1);}`;
         f = `
+            uniform sampler2D sampler;
+            
             precision highp float;
             uniform float t;
             uniform vec2 r;
             void main(){
                 vec2 position = - 1.0 + 2.0 * gl_FragCoord.xy / r;
+                vec2 uv = gl_FragCoord.xy / r;
                 vec3 col = vec3(
                     abs( sin( position.x * position.y + t / 5.0 ) ),
                     abs( sin( position.x * position.y + t / 4.0 ) ),
                     abs( sin( position.x * position.y + t / 3.0 ) )
                 );
                 gl_FragColor=vec4(col,1);
+                gl_FragColor = texture2D(sampler, uv);
             }
         `;
-        g = c.getContext('experimental-webgl');
-        g.bindBuffer(34962, g.createBuffer());
-        g.bufferData(34962, new Float32Array([-3, -1, 3, -1, 0, 2]), 35044);
-        p = g.createProgram();
-        g.attachShader(p, k(v, 35633));
-        g.attachShader(p, k(f, 35632));
-        g.linkProgram(p);
+        gl = c.getContext('experimental-webgl');
+        gl.bindBuffer(34962, gl.createBuffer());
+        gl.bufferData(34962, new Float32Array([-3, -1, 3, -1, 0, 2]), 35044);
+        
+        const texture = loadTexture(gl, "image.png");
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+        
+        p = gl.createProgram();
+        gl.attachShader(p, k(v, 35633));
+        gl.attachShader(p, k(f, 35632));
+        gl.linkProgram(p);
+        
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        let samplerUniform = gl.getUniformLocation(p, "sampler")
+        gl.uniform1i(samplerUniform, 0);
+
         x();
         function x() {
             if (w != c.clientWidth || h != c.clientHeight) {
@@ -32,19 +48,149 @@
                 h = c.clientHeight;
                 c.width = w;
                 c.height = h;
-                g.viewport(0, 0, w, h)
-            } g.useProgram(p);
-            g.uniform1f(g.getUniformLocation(p, 't'), (new Date().getTime() - r) / 1e3);
-            g.uniform2f(g.getUniformLocation(p, 'r'), w, h);
-            g.vertexAttribPointer(s, 2, 5126, 0, 0, 0);
-            g.enableVertexAttribArray(s);
-            g.drawArrays(4, 0, 3);
+                gl.viewport(0, 0, w, h)
+            } gl.useProgram(p);
+            gl.uniform1f(gl.getUniformLocation(p, 't'), (new Date().getTime() - r) / 1e3);
+            gl.uniform2f(gl.getUniformLocation(p, 'r'), w, h);
+            gl.vertexAttribPointer(s, 2, 5126, 0, 0, 0);
+            gl.enableVertexAttribArray(s);
+            gl.drawArrays(4, 0, 3);
             requestAnimationFrame(x)
         } function k(q, e) {
-            d = g.createShader(e);
-            g.shaderSource(d, q);
-            g.compileShader(d);
+            d = gl.createShader(e);
+            gl.shaderSource(d, q);
+            gl.compileShader(d);
             return d
         }
+
+        function loadTexture(gl, url) { // from https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+
+            const level = 0;
+            const internalFormat = gl.RGBA;
+            const width = 1;
+            const height = 1;
+            const border = 0;
+            const srcFormat = gl.RGBA;
+            const srcType = gl.UNSIGNED_BYTE;
+            const pixel = new Uint8Array([0, 0, 255, 255]); // opaque blue
+            gl.texImage2D(
+                gl.TEXTURE_2D,
+                level,
+                internalFormat,
+                width,
+                height,
+                border,
+                srcFormat,
+                srcType,
+                pixel,
+            );
+
+            const image = new Image();
+            image.onload = () => {
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(
+                gl.TEXTURE_2D,
+                level,
+                internalFormat,
+                srcFormat,
+                srcType,
+                image,
+                );
+
+                // WebGL1 has different requirements for power of 2 images
+                // vs. non power of 2 images so check if the image is a
+                // power of 2 in both dimensions.
+                if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+                // Yes, it's a power of 2. Generate mips.
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                } else {
+                    // No, it's not a power of 2. Turn off mips and set
+                    // wrapping to clamp to edge
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+                }
+            };
+            image.src = url;
+
+            return texture;
+        }
+
+        function isPowerOf2(value) {
+            return (value & (value - 1)) === 0;
+        }
+
     </script>
 </body>
+
+
+<!-- 
+
+//
+// Initialize a texture and load an image.
+// When the image finished loading copy it into the texture.
+//
+function loadTexture(gl, url) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+
+  const level = 0;
+  const internalFormat = gl.RGBA;
+  const width = 1;
+  const height = 1;
+  const border = 0;
+  const srcFormat = gl.RGBA;
+  const srcType = gl.UNSIGNED_BYTE;
+  const pixel = new Uint8Array([0, 0, 255, 255]); // opaque blue
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    level,
+    internalFormat,
+    width,
+    height,
+    border,
+    srcFormat,
+    srcType,
+    pixel,
+  );
+
+  const image = new Image();
+  image.onload = () => {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      level,
+      internalFormat,
+      srcFormat,
+      srcType,
+      image,
+    );
+
+    // WebGL1 has different requirements for power of 2 images
+    // vs. non power of 2 images so check if the image is a
+    // power of 2 in both dimensions.
+    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+      // Yes, it's a power of 2. Generate mips.
+      gl.generateMipmap(gl.TEXTURE_2D);
+    } else {
+      // No, it's not a power of 2. Turn off mips and set
+      // wrapping to clamp to edge
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+    }
+  };
+  image.src = url;
+
+  return texture;
+}
+
+function isPowerOf2(value) {
+  return (value & (value - 1)) === 0;
+}
+
+-->
